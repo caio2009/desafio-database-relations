@@ -20,13 +20,54 @@ interface IRequest {
 @injectable()
 class CreateOrderService {
   constructor(
+    @inject('OrdersRepository')
     private ordersRepository: IOrdersRepository,
+    @inject('ProductsRepository')
     private productsRepository: IProductsRepository,
+    @inject('CustomersRepository')
     private customersRepository: ICustomersRepository,
-  ) {}
+  ) { }
 
   public async execute({ customer_id, products }: IRequest): Promise<Order> {
-    // TODO
+    if (!customer_id || !products) {
+      throw new AppError('Invalid data for create a new order', 400);
+    }
+
+    const customer = await this.customersRepository.findById(customer_id);
+
+    if (!customer) {
+      throw new AppError('Customer not found', 404);
+    }
+
+    let findedProducts = await this.productsRepository.findAllById(products.map(product => ({ id: product.id })));
+
+    products.forEach(product => {
+      const findedProduct = findedProducts.find(x => x.id === product.id);
+
+      if (!findedProduct) {
+        throw new AppError('Product not found');
+      }
+
+      if (product.quantity > findedProduct.quantity) {
+        throw new AppError('Insufficient product', 400);
+      }
+    });
+
+    const order = await this.ordersRepository.create({
+      customer,
+      products: findedProducts.map(product => ({
+        product_id: product.id,
+        price: product.price,
+        quantity: products.find(x => x.id === product.id)?.quantity || 0
+      }))
+    });
+
+    await this.productsRepository.updateQuantity(findedProducts.map(product => ({
+      id: product.id,
+      quantity: product.quantity - (products.find(x => x.id === product.id)?.quantity || 0)
+    })));
+
+    return order;
   }
 }
 
